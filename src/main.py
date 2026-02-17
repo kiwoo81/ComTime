@@ -19,8 +19,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QTimer, Qt, QDate
 
-# DB 경로를 스크립트 위치 기준으로 고정
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# DB 경로: exe로 패키징된 경우 exe 위치 기준, 스크립트 실행 시 스크립트 위치 기준
+if getattr(sys, "frozen", False):
+    _BASE_DIR = os.path.dirname(sys.executable)
+else:
+    _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _DB_PATH = os.path.join(_BASE_DIR, "timelimiter.db")
 
 from db import Database
