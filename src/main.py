@@ -1,4 +1,5 @@
 import sys
+import os
 from datetime import datetime, date
 from PyQt6.QtWidgets import (
     QApplication,
@@ -16,6 +17,10 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QTimer, Qt
 
+# DB 경로를 스크립트 위치 기준으로 고정
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_DB_PATH = os.path.join(_BASE_DIR, "timelimiter.db")
+
 from db import Database
 
 
@@ -23,7 +28,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("TimeLimiter - 컴퓨터 사용 시간 관리")
-        self.db = Database("timelimiter.db")
+        self.db = Database(_DB_PATH)
         self.running = False
         self.current_session_id = None
         self.session_start = None
@@ -199,15 +204,42 @@ class KioskWindow(QMainWindow):
         self.setWindowTitle("Locked")
         self._init_ui()
         self.showFullScreen()
+        # Windows: 작업 표시줄 숨기기
+        if sys.platform == "win32":
+            self._set_taskbar_visible(False)
         # 주기적으로 최상위 유지
         self._stay_on_top_timer = QTimer()
-        self._stay_on_top_timer.setInterval(1000)
+        self._stay_on_top_timer.setInterval(500)
         self._stay_on_top_timer.timeout.connect(self._ensure_on_top)
         self._stay_on_top_timer.start()
 
     def _ensure_on_top(self):
         self.raise_()
         self.activateWindow()
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                hwnd = int(self.winId())
+                # HWND_TOPMOST(-1), SWP_NOMOVE|SWP_NOSIZE
+                ctypes.windll.user32.SetWindowPos(
+                    hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002
+                )
+                # 포커스 강제 획득
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+
+    @staticmethod
+    def _set_taskbar_visible(visible: bool):
+        """Windows 작업 표시줄 표시/숨기기"""
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.FindWindowW("Shell_TrayWnd", None)
+            if hwnd:
+                # SW_SHOW=5, SW_HIDE=0
+                ctypes.windll.user32.ShowWindow(hwnd, 5 if visible else 0)
+        except Exception:
+            pass
 
     def _init_ui(self):
         label = QLabel("컴퓨터 사용이 중지되었습니다.")
@@ -229,6 +261,8 @@ class KioskWindow(QMainWindow):
     def _unlock(self):
         self._unlocked = True
         self._stay_on_top_timer.stop()
+        if sys.platform == "win32":
+            self._set_taskbar_visible(True)
         self.close()
         if self._on_unlock:
             self._on_unlock()
