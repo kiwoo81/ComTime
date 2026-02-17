@@ -338,6 +338,7 @@ class KioskWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")  # Mac/Windows 동일한 스타일 렌더링
     win = MainWindow()
     win.resize(600, 400)
     win.show()
