@@ -90,10 +90,22 @@ python src/main.py
 - Fusion 스타일 적용으로 Mac/Windows UI 통일
 - exe 패키징 지원: PyInstaller --onefile, frozen 환경에서 DB 경로 sys.executable 기준으로 수정
 
-## exe 빌드 방법
+## 실행 파일 빌드 방법
+
+### Windows (.exe)
 ```bash
 pyinstaller --onefile --windowed --name TimeLimiter --add-data "src/db.py;." src/main.py
 ```
 - 결과물: `dist/TimeLimiter.exe` (약 36MB)
-- DB 파일은 exe와 같은 폴더에 생성됨
+
+### macOS (.app)
+```bash
+source .venv/bin/activate
+pyinstaller --onefile --windowed --name TimeLimiter --add-data "src/db.py:." src/main.py
+```
+- 결과물: `dist/TimeLimiter` 또는 `dist/TimeLimiter.app`
+- 구분자 차이 주의: Windows는 `;`, macOS는 `:`
+
+### 공통
+- DB 파일은 실행 파일과 같은 폴더에 생성됨
 - `dist/`, `build/`, `*.spec`은 .gitignore에 제외됨
