@@ -1,11 +1,12 @@
 import sys
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QPushButton,
     QLabel,
     QTableWidget,
@@ -14,8 +15,9 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QLineEdit,
     QMessageBox,
+    QDateEdit,
 )
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import QTimer, Qt, QDate
 
 # DB 경로를 스크립트 위치 기준으로 고정
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,6 +35,7 @@ class MainWindow(QMainWindow):
         self.current_session_id = None
         self.session_start = None
         self.current_date = date.today()
+        self.selected_date = date.today()
 
         # resume open session if exists
         open_s = self.db.get_open_session()
@@ -51,8 +54,42 @@ class MainWindow(QMainWindow):
         self.time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.time_label)
 
+        # 날짜 탐색 UI
+        date_nav = QHBoxLayout()
+        self.prev_btn = QPushButton("◀")
+        self.prev_btn.setFixedWidth(40)
+        self.date_edit = QDateEdit()
+        self.date_edit.setDate(QDate.currentDate())
+        self.date_edit.setMaximumDate(QDate.currentDate())
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.next_btn = QPushButton("▶")
+        self.next_btn.setFixedWidth(40)
+        date_nav.addWidget(self.prev_btn)
+        date_nav.addWidget(self.date_edit)
+        date_nav.addWidget(self.next_btn)
+        layout.addLayout(date_nav)
+
         self.stop_btn = QPushButton("사용 중지")
         self.stop_btn.setEnabled(False)
+        self.stop_btn.setFixedHeight(48)
+        self.stop_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 16px;
+                font-weight: bold;
+                color: white;
+                background-color: #c0392b;
+                border: none;
+                border-radius: 8px;
+            }
+            QPushButton:hover {
+                background-color: #e74c3c;
+            }
+            QPushButton:disabled {
+                background-color: #888888;
+                color: #cccccc;
+            }
+        """)
         layout.addWidget(self.stop_btn)
 
         self.log_table = QTableWidget(0, 3)
@@ -64,6 +101,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self.stop_btn.clicked.connect(self.on_stop)
+        self.prev_btn.clicked.connect(self.on_prev_date)
+        self.next_btn.clicked.connect(self.on_next_date)
+        self.date_edit.dateChanged.connect(self.on_date_changed)
 
         self.timer = QTimer()
         self.timer.setInterval(1000)
@@ -120,13 +160,18 @@ class MainWindow(QMainWindow):
                 self.current_session_id = new_id
                 self.session_start = midnight
             self.current_date = today
-        total = self.db.get_total_seconds_for_date(self.current_date)
-        if self.running and self.session_start:
+            self.date_edit.setMaximumDate(QDate.currentDate())
+        total = self.db.get_total_seconds_for_date(self.selected_date)
+        if self.running and self.session_start and self.selected_date == self.current_date:
             total += int((datetime.now() - self.session_start).total_seconds())
         hrs = total // 3600
         mins = (total % 3600) // 60
         secs = total % 60
-        self.time_label.setText(f"오늘 사용: {hrs:02d}:{mins:02d}:{secs:02d}")
+        if self.selected_date == today:
+            prefix = "오늘 사용"
+        else:
+            prefix = f"{self.selected_date.strftime('%m/%d')} 사용"
+        self.time_label.setText(f"{prefix}: {hrs:02d}:{mins:02d}:{secs:02d}")
         self.refresh_logs()
 
     @staticmethod
@@ -146,7 +191,7 @@ class MainWindow(QMainWindow):
         return f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
 
     def refresh_logs(self):
-        sessions = self.db.get_sessions_for_date(self.current_date)
+        sessions = self.db.get_sessions_for_date(self.selected_date)
         self.log_table.setRowCount(0)
         for s in sessions:
             row = self.log_table.rowCount()
@@ -157,6 +202,20 @@ class MainWindow(QMainWindow):
             self.log_table.setItem(row, 0, QTableWidgetItem(start))
             self.log_table.setItem(row, 1, QTableWidgetItem(end))
             self.log_table.setItem(row, 2, QTableWidgetItem(dur))
+
+    def on_prev_date(self):
+        new_date = self.selected_date - timedelta(days=1)
+        self.date_edit.setDate(QDate(new_date.year, new_date.month, new_date.day))
+
+    def on_next_date(self):
+        new_date = self.selected_date + timedelta(days=1)
+        if new_date <= date.today():
+            self.date_edit.setDate(QDate(new_date.year, new_date.month, new_date.day))
+
+    def on_date_changed(self, qdate: QDate):
+        self.selected_date = date(qdate.year(), qdate.month(), qdate.day())
+        self.next_btn.setEnabled(self.selected_date < date.today())
+        self.update_timer()
 
     def refresh_ui(self):
         self.update_timer()
@@ -246,7 +305,7 @@ class KioskWindow(QMainWindow):
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setStyleSheet("font-size: 24px; color: white;")
         btn = QPushButton("사용 시작")
-        btn.setStyleSheet("font-size: 18px; padding: 10px 30px;")
+        btn.setStyleSheet("font-size: 18px; padding: 10px 30px; color: white; border: 2px solid white; border-radius: 6px;")
         btn.clicked.connect(self._unlock)
         layout = QVBoxLayout()
         layout.addStretch()
