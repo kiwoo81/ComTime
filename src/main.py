@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QMenu,
 )
 from PyQt6.QtCore import QTimer, Qt, QDate
+from PyQt6.QtGui import QIcon
 
 # DB 경로: exe로 패키징된 경우 exe 위치 기준, 스크립트 실행 시 스크립트 위치 기준
 if getattr(sys, "frozen", False):
@@ -27,6 +28,12 @@ if getattr(sys, "frozen", False):
 else:
     _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _DB_PATH = os.path.join(_BASE_DIR, "comtime.db")
+
+# 아이콘 경로: 프로젝트 루트에 위치
+if getattr(sys, "frozen", False):
+    _ICON_PATH = os.path.join(_BASE_DIR, "comtime_icon.png")
+else:
+    _ICON_PATH = os.path.join(os.path.dirname(_BASE_DIR), "comtime_icon.png")
 
 from db import Database
 
@@ -86,6 +93,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ComTime - 컴퓨터 사용 시간 관리")
+        if os.path.exists(_ICON_PATH):
+            self.setWindowIcon(QIcon(_ICON_PATH))
         self.db = Database(_DB_PATH)
         self.running = False
         self.current_session_id = None
@@ -505,6 +514,8 @@ class KioskWindow(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")  # Mac/Windows 동일한 스타일 렌더링
+    if os.path.exists(_ICON_PATH):
+        app.setWindowIcon(QIcon(_ICON_PATH))
     win = MainWindow()
     win.resize(600, 550)
     win.show()
