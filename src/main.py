@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QDateEdit,
+    QMenu,
 )
 from PyQt6.QtCore import QTimer, Qt, QDate
 
@@ -150,6 +151,9 @@ class MainWindow(QMainWindow):
         self.log_table = QTableWidget(0, 3)
         self.log_table.setHorizontalHeaderLabels(["시작 시간", "종료 시간", "사용 시간"])
         self.log_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.log_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.log_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.log_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         layout.addWidget(self.log_table)
 
         # 프로그램 사용 내역
@@ -175,6 +179,7 @@ class MainWindow(QMainWindow):
         self.prev_btn.clicked.connect(self.on_prev_date)
         self.next_btn.clicked.connect(self.on_next_date)
         self.date_edit.dateChanged.connect(self.on_date_changed)
+        self.log_table.customContextMenuRequested.connect(self.on_log_table_context_menu)
 
         self.timer = QTimer()
         self.timer.setInterval(1000)
@@ -293,6 +298,7 @@ class MainWindow(QMainWindow):
             self.app_table.setItem(row, 1, QTableWidgetItem(self._format_duration(secs)))
 
     def refresh_logs(self):
+        current_row = self.log_table.currentRow()
         sessions = self.db.get_sessions_for_date(self.selected_date)
         self.log_table.setRowCount(0)
         for s in sessions:
@@ -301,9 +307,38 @@ class MainWindow(QMainWindow):
             start = self._format_ts(s.get("start_ts") or "")
             end = self._format_ts(s.get("end_ts") or "")
             dur = self._format_duration(s.get("duration_seconds"))
-            self.log_table.setItem(row, 0, QTableWidgetItem(start))
+            start_item = QTableWidgetItem(start)
+            start_item.setData(Qt.ItemDataRole.UserRole, s.get("id"))
+            self.log_table.setItem(row, 0, start_item)
             self.log_table.setItem(row, 1, QTableWidgetItem(end))
             self.log_table.setItem(row, 2, QTableWidgetItem(dur))
+        if current_row >= 0 and current_row < self.log_table.rowCount():
+            self.log_table.selectRow(current_row)
+
+    def on_log_table_context_menu(self, pos):
+        row = self.log_table.rowAt(pos.y())
+        if row < 0:
+            return
+        session_id = self.log_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        menu = QMenu(self)
+        delete_action = menu.addAction("이 세션 삭제")
+        action = menu.exec(self.log_table.viewport().mapToGlobal(pos))
+        if action != delete_action:
+            return
+        if session_id == self.current_session_id:
+            QMessageBox.warning(self, "오류", "현재 진행 중인 세션은 삭제할 수 없습니다.")
+            return
+        pin, ok = QInputDialog.getText(
+            self, "세션 삭제", "삭제하려면 PIN을 입력하세요:",
+            QLineEdit.EchoMode.Password
+        )
+        if not ok:
+            return
+        if not self.db.verify_pin(pin):
+            QMessageBox.warning(self, "오류", "PIN이 올바르지 않습니다.")
+            return
+        self.db.delete_session(session_id)
+        self.refresh_ui()
 
     def on_prev_date(self):
         new_date = self.selected_date - timedelta(days=1)
