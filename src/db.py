@@ -95,6 +95,12 @@ class Database:
         row = cur.fetchone()
         return dict(row) if row else None
 
+    def delete_session(self, session_id: int):
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM app_usage WHERE session_id=?", (session_id,))
+        cur.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+        self.conn.commit()
+
     # Settings helpers (simple key/value). PIN is stored as sha256(hex).
     def set_setting(self, key: str, value: str):
         cur = self.conn.cursor()
