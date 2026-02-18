@@ -162,6 +162,12 @@ class MainWindow(QMainWindow):
         central.setLayout(layout)
         self.setCentralWidget(central)
 
+        # 메뉴바
+        menu_bar = self.menuBar()
+        settings_menu = menu_bar.addMenu("설정")
+        change_pin_action = settings_menu.addAction("PIN 변경")
+        change_pin_action.triggered.connect(self._change_pin)
+
         self.stop_btn.clicked.connect(self.on_stop)
         self.prev_btn.clicked.connect(self.on_prev_date)
         self.next_btn.clicked.connect(self.on_next_date)
@@ -343,6 +349,33 @@ class MainWindow(QMainWindow):
         self.db.set_pin(p1)
         QMessageBox.information(self, "완료", "PIN이 설정되었습니다.")
         return True
+
+    def _change_pin(self):
+        # 현재 PIN 확인
+        cur_pin, ok = QInputDialog.getText(
+            self, "PIN 변경", "현재 PIN을 입력하세요:",
+            QLineEdit.EchoMode.Password
+        )
+        if not ok or not self.db.verify_pin(cur_pin):
+            if ok:
+                QMessageBox.warning(self, "오류", "현재 PIN이 올바르지 않습니다.")
+            return
+        # 새 PIN 입력
+        new1, ok1 = QInputDialog.getText(
+            self, "PIN 변경", "새 PIN 입력:",
+            QLineEdit.EchoMode.Password
+        )
+        if not ok1 or not new1:
+            return
+        new2, ok2 = QInputDialog.getText(
+            self, "PIN 변경", "새 PIN 다시 입력:",
+            QLineEdit.EchoMode.Password
+        )
+        if not ok2 or new1 != new2:
+            QMessageBox.warning(self, "오류", "새 PIN이 일치하지 않습니다.")
+            return
+        self.db.set_pin(new1)
+        QMessageBox.information(self, "완료", "PIN이 변경되었습니다.")
 
 
 class KioskWindow(QMainWindow):
