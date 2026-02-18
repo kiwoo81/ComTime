@@ -1,4 +1,4 @@
-# TimeLimiter - CLAUDE.md
+# ComTime - CLAUDE.md
 
 ## 프로젝트 개요
 아이 컴퓨터 사용 시간을 관리하는 부모 통제 애플리케이션.
@@ -22,7 +22,7 @@
 
 ## 프로젝트 구조
 ```
-TimeLimiter/
+ComTime/
 ├── CLAUDE.md              # 이 파일
 ├── requirements.txt       # PyQt6
 ├── .gitignore
@@ -102,16 +102,16 @@ python src/main.py
 
 ### Windows (.exe)
 ```bash
-pyinstaller --onefile --windowed --name TimeLimiter --add-data "src/db.py;." src/main.py
+pyinstaller --onefile --windowed --name ComTime --add-data "src/db.py;." src/main.py
 ```
-- 결과물: `dist/TimeLimiter.exe` (약 36MB)
+- 결과물: `dist/ComTime.exe` (약 36MB)
 
 ### macOS (.app)
 ```bash
 source .venv/bin/activate
-pyinstaller --onefile --windowed --name TimeLimiter --add-data "src/db.py:." src/main.py
+pyinstaller --onefile --windowed --name ComTime --add-data "src/db.py:." src/main.py
 ```
-- 결과물: `dist/TimeLimiter` 또는 `dist/TimeLimiter.app`
+- 결과물: `dist/ComTime` 또는 `dist/ComTime.app`
 - 구분자 차이 주의: Windows는 `;`, macOS는 `:`
 
 ### 공통

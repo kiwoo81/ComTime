@@ -26,14 +26,14 @@ if getattr(sys, "frozen", False):
     _BASE_DIR = os.path.dirname(sys.executable)
 else:
     _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-_DB_PATH = os.path.join(_BASE_DIR, "timelimiter.db")
+_DB_PATH = os.path.join(_BASE_DIR, "comtime.db")
 
 from db import Database
 
 def _is_self_app(name: str) -> bool:
-    """자기 자신(TimeLimiter, Python 계열)인지 확인"""
+    """자기 자신(ComTime, Python 계열)인지 확인"""
     lower = name.lower()
-    return lower.startswith("python") or lower.startswith("timelimiter")
+    return lower.startswith("python") or lower.startswith("comtime") or lower.startswith("timelimiter")
 
 
 def get_foreground_app():
@@ -85,7 +85,7 @@ def get_foreground_app():
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("TimeLimiter - 컴퓨터 사용 시간 관리")
+        self.setWindowTitle("ComTime - 컴퓨터 사용 시간 관리")
         self.db = Database(_DB_PATH)
         self.running = False
         self.current_session_id = None

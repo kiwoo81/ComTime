@@ -1,4 +1,4 @@
-# TimeLimiter
+# ComTime
 
 아이 컴퓨터 사용 시간을 관리하는 부모 통제 애플리케이션입니다.
 
@@ -42,18 +42,18 @@ python src/main.py
 
 ### Windows
 ```bash
-pyinstaller --onefile --windowed --name TimeLimiter --add-data "src/db.py;." src/main.py
+pyinstaller --onefile --windowed --name ComTime --add-data "src/db.py;." src/main.py
 ```
 
 ### macOS
 ```bash
-pyinstaller --onefile --windowed --name TimeLimiter --add-data "src/db.py:." src/main.py
+pyinstaller --onefile --windowed --name ComTime --add-data "src/db.py:." src/main.py
 ```
 
 ## 프로젝트 구조
 
 ```
-TimeLimiter/
+ComTime/
 ├── README.md
 ├── CLAUDE.md
 ├── requirements.txt
