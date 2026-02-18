@@ -29,7 +29,10 @@ _DB_PATH = os.path.join(_BASE_DIR, "timelimiter.db")
 
 from db import Database
 
-_SELF_APP_NAMES = {"TimeLimiter", "timelimiter", "Python", "python", "python3"}
+def _is_self_app(name: str) -> bool:
+    """자기 자신(TimeLimiter, Python 계열)인지 확인"""
+    lower = name.lower()
+    return lower.startswith("python") or lower.startswith("timelimiter")
 
 
 def get_foreground_app():
@@ -43,7 +46,7 @@ def get_foreground_app():
             )
             if result.returncode == 0:
                 name = result.stdout.strip()
-                if name and name not in _SELF_APP_NAMES:
+                if name and not _is_self_app(name):
                     return name
         elif sys.platform == "win32":
             import ctypes
@@ -68,10 +71,10 @@ def get_foreground_app():
                         exe_path = exe_buf.value
                         if exe_path:
                             name = os.path.splitext(os.path.basename(exe_path))[0]
-                            if name and name not in _SELF_APP_NAMES:
+                            if name and not _is_self_app(name):
                                 return name
                     # fallback: 윈도우 제목 사용
-                    if title and not any(s in title.lower() for s in ("timelimiter",)):
+                    if title and not _is_self_app(title):
                         return title
     except Exception:
         pass
