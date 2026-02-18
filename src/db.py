@@ -25,6 +25,16 @@ class Database:
             value TEXT
         )
         """)
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS app_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            app_name TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            duration_seconds INTEGER DEFAULT 0,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
+        )
+        """)
         self.conn.commit()
 
     def start_session(self, start_ts_iso: str) -> int:
@@ -106,6 +116,47 @@ class Database:
         if not stored:
             return False
         return stored == hashlib.sha256(pin_plain.encode("utf-8")).hexdigest()
+
+    # App usage tracking
+    def record_app_usage(self, session_id: int, app_name: str, interval: int = 5):
+        """포그라운드 앱 기록. 같은 세션/앱이면 interval초만큼 누적, 아니면 새 레코드."""
+        cur = self.conn.cursor()
+        cur.execute(
+            "SELECT id, duration_seconds FROM app_usage "
+            "WHERE session_id=? AND app_name=? "
+            "ORDER BY id DESC LIMIT 1",
+            (session_id, app_name),
+        )
+        row = cur.fetchone()
+        if row:
+            new_dur = (row["duration_seconds"] or 0) + interval
+            cur.execute(
+                "UPDATE app_usage SET duration_seconds=? WHERE id=?",
+                (new_dur, row["id"]),
+            )
+        else:
+            cur.execute(
+                "INSERT INTO app_usage (session_id, app_name, started_at, duration_seconds) VALUES (?,?,?,?)",
+                (session_id, app_name, datetime.now().isoformat(), interval),
+            )
+        self.conn.commit()
+
+    def get_app_usage_for_date(self, d: date):
+        """날짜별 앱 사용 요약 (앱별 총 사용시간, 내림차순)."""
+        cur = self.conn.cursor()
+        date_str = d.isoformat()
+        cur.execute(
+            """
+            SELECT au.app_name, SUM(au.duration_seconds) as total_seconds
+            FROM app_usage au
+            JOIN sessions s ON au.session_id = s.id
+            WHERE date(s.start_ts)=? OR date(s.end_ts)=?
+            GROUP BY au.app_name
+            ORDER BY total_seconds DESC
+            """,
+            (date_str, date_str),
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 if __name__ == "__main__":

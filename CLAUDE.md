@@ -6,6 +6,14 @@
 - 최초 개발 환경: macOS
 - 현재 작업: Windows 이식 및 호환성 확인
 
+## 크로스플랫폼 호환성 규칙
+**중요**: 기능 추가 또는 소스 코드 변경 시 반드시 macOS와 Windows 양쪽에서 정상 동작하는지 호환성 체크를 수행할 것.
+- `sys.platform` 분기가 필요한지 확인 (예: ctypes, subprocess, 파일 경로)
+- macOS 전용 API (osascript, AppKit 등) 사용 시 Windows 대체 구현 필수
+- Windows 전용 API (ctypes.windll 등) 사용 시 `sys.platform == "win32"` 가드 필수
+- 파일 경로 구분자는 `os.path.join()` 사용 (하드코딩 금지)
+- 새 외부 의존성 추가 시 양쪽 OS에서 설치 가능한지 확인
+
 ## 기술 스택
 - **언어**: Python 3.x
 - **GUI**: PyQt6

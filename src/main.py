@@ -1,5 +1,6 @@
 import sys
 import os
+import subprocess
 from datetime import datetime, date, timedelta
 from PyQt6.QtWidgets import (
     QApplication,
@@ -27,6 +28,54 @@ else:
 _DB_PATH = os.path.join(_BASE_DIR, "timelimiter.db")
 
 from db import Database
+
+_SELF_APP_NAMES = {"TimeLimiter", "timelimiter", "Python", "python", "python3"}
+
+
+def get_foreground_app():
+    """현재 포그라운드(활성) 앱 이름을 반환. 실패 시 None."""
+    try:
+        if sys.platform == "darwin":
+            result = subprocess.run(
+                ["osascript", "-e",
+                 'tell application "System Events" to get name of first application process whose frontmost is true'],
+                capture_output=True, text=True, timeout=3,
+            )
+            if result.returncode == 0:
+                name = result.stdout.strip()
+                if name and name not in _SELF_APP_NAMES:
+                    return name
+        elif sys.platform == "win32":
+            import ctypes
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            if hwnd:
+                length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+                    title = buf.value
+                    # 프로세스 이름 가져오기
+                    pid = ctypes.c_ulong()
+                    ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                    h_proc = ctypes.windll.kernel32.OpenProcess(0x0410, False, pid.value)
+                    if h_proc:
+                        exe_buf = ctypes.create_unicode_buffer(260)
+                        size = ctypes.c_ulong(260)
+                        ctypes.windll.kernel32.QueryFullProcessImageNameW(
+                            h_proc, 0, exe_buf, ctypes.byref(size)
+                        )
+                        ctypes.windll.kernel32.CloseHandle(h_proc)
+                        exe_path = exe_buf.value
+                        if exe_path:
+                            name = os.path.splitext(os.path.basename(exe_path))[0]
+                            if name and name not in _SELF_APP_NAMES:
+                                return name
+                    # fallback: 윈도우 제목 사용
+                    if title and not any(s in title.lower() for s in ("timelimiter",)):
+                        return title
+    except Exception:
+        pass
+    return None
 
 
 class MainWindow(QMainWindow):
@@ -100,6 +149,16 @@ class MainWindow(QMainWindow):
         self.log_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.log_table)
 
+        # 프로그램 사용 내역
+        app_label = QLabel("프로그램 사용 내역")
+        app_label.setStyleSheet("font-weight: bold; margin-top: 8px;")
+        layout.addWidget(app_label)
+
+        self.app_table = QTableWidget(0, 2)
+        self.app_table.setHorizontalHeaderLabels(["프로그램", "사용 시간"])
+        self.app_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.app_table)
+
         central.setLayout(layout)
         self.setCentralWidget(central)
 
@@ -112,6 +171,12 @@ class MainWindow(QMainWindow):
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.update_timer)
 
+        # 포그라운드 앱 추적 타이머 (5초 간격)
+        self._last_app = None
+        self._app_timer = QTimer()
+        self._app_timer.setInterval(5000)
+        self._app_timer.timeout.connect(self._track_foreground_app)
+
         # PIN이 없으면 최초 실행 시 설정 (부모가 설정)
         if self.db.get_setting("pin_sha256") is None:
             self._prompt_set_pin()
@@ -122,6 +187,7 @@ class MainWindow(QMainWindow):
         else:
             self.stop_btn.setEnabled(True)
             self.timer.start()
+            self._app_timer.start()
 
         self.refresh_ui()
 
@@ -133,14 +199,18 @@ class MainWindow(QMainWindow):
         session_id = self.db.start_session(now.isoformat())
         self.current_session_id = session_id
         self.running = True
+        self._last_app = None
         self.stop_btn.setEnabled(True)
         self.timer.start()
+        self._app_timer.start()
         self.refresh_ui()
 
     def on_stop(self):
         if not self.running:
             return
         now = datetime.now()
+        self._app_timer.stop()
+        self._last_app = None
         self.db.end_session(self.current_session_id, now.isoformat())
         self.running = False
         self.current_session_id = None
@@ -176,6 +246,7 @@ class MainWindow(QMainWindow):
             prefix = f"{self.selected_date.strftime('%m/%d')} 사용"
         self.time_label.setText(f"{prefix}: {hrs:02d}:{mins:02d}:{secs:02d}")
         self.refresh_logs()
+        self.refresh_app_usage()
 
     @staticmethod
     def _format_ts(iso_str: str) -> str:
@@ -192,6 +263,25 @@ class MainWindow(QMainWindow):
             return "진행 중"
         s = int(seconds)
         return f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
+    def _track_foreground_app(self):
+        if not self.running or not self.current_session_id:
+            return
+        app_name = get_foreground_app()
+        if not app_name:
+            return
+        self.db.record_app_usage(self.current_session_id, app_name, 5)
+        self._last_app = app_name
+
+    def refresh_app_usage(self):
+        usages = self.db.get_app_usage_for_date(self.selected_date)
+        self.app_table.setRowCount(0)
+        for u in usages:
+            row = self.app_table.rowCount()
+            self.app_table.insertRow(row)
+            self.app_table.setItem(row, 0, QTableWidgetItem(u.get("app_name", "")))
+            secs = u.get("total_seconds") or 0
+            self.app_table.setItem(row, 1, QTableWidgetItem(self._format_duration(secs)))
 
     def refresh_logs(self):
         sessions = self.db.get_sessions_for_date(self.selected_date)
@@ -223,6 +313,7 @@ class MainWindow(QMainWindow):
     def refresh_ui(self):
         self.update_timer()
         self.refresh_logs()
+        self.refresh_app_usage()
 
     def closeEvent(self, event):
         # PIN이 설정되어 있으면 PIN 입력 없이 종료 불가
@@ -237,6 +328,7 @@ class MainWindow(QMainWindow):
                 return
         if self.running and self.current_session_id:
             now = datetime.now()
+            self._app_timer.stop()
             self.db.end_session(self.current_session_id, now.isoformat())
         event.accept()
 
@@ -343,6 +435,6 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")  # Mac/Windows 동일한 스타일 렌더링
     win = MainWindow()
-    win.resize(600, 400)
+    win.resize(600, 550)
     win.show()
     sys.exit(app.exec())
