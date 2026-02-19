@@ -164,6 +164,22 @@ class Database:
         )
         return [dict(r) for r in cur.fetchall()]
 
+    def delete_app_usage_by_name_and_date(self, app_name: str, d: date):
+        """특정 날짜의 특정 앱 사용 기록 전체 삭제."""
+        cur = self.conn.cursor()
+        date_str = d.isoformat()
+        cur.execute(
+            """
+            DELETE FROM app_usage WHERE id IN (
+                SELECT au.id FROM app_usage au
+                JOIN sessions s ON au.session_id = s.id
+                WHERE au.app_name=? AND (date(s.start_ts)=? OR date(s.end_ts)=?)
+            )
+            """,
+            (app_name, date_str, date_str),
+        )
+        self.conn.commit()
+
 
 if __name__ == "__main__":
     # 간단한 로컬 테스트

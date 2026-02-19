@@ -13,14 +13,15 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QHeaderView,
-    QInputDialog,
     QLineEdit,
     QMessageBox,
     QDateEdit,
     QMenu,
+    QDialog,
+    QDialogButtonBox,
 )
 from PyQt6.QtCore import QTimer, Qt, QDate
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QIntValidator
 
 # DB 경로: exe로 패키징된 경우 exe 위치 기준, 스크립트 실행 시 스크립트 위치 기준
 if getattr(sys, "frozen", False):
@@ -47,9 +48,10 @@ def get_foreground_app():
     """현재 포그라운드(활성) 앱 이름을 반환. 실패 시 None."""
     try:
         if sys.platform == "darwin":
+            # 표시 이름(displayed name) 사용 - Electron 등 내부 프로세스명 대신 실제 앱 이름 반환
             result = subprocess.run(
                 ["osascript", "-e",
-                 'tell application "System Events" to get name of first application process whose frontmost is true'],
+                 'tell application "System Events" to get displayed name of first application process whose frontmost is true'],
                 capture_output=True, text=True, timeout=3,
             )
             if result.returncode == 0:
@@ -173,6 +175,9 @@ class MainWindow(QMainWindow):
         self.app_table = QTableWidget(0, 2)
         self.app_table.setHorizontalHeaderLabels(["프로그램", "사용 시간"])
         self.app_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.app_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.app_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.app_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         layout.addWidget(self.app_table)
 
         central.setLayout(layout)
@@ -189,6 +194,7 @@ class MainWindow(QMainWindow):
         self.next_btn.clicked.connect(self.on_next_date)
         self.date_edit.dateChanged.connect(self.on_date_changed)
         self.log_table.customContextMenuRequested.connect(self.on_log_table_context_menu)
+        self.app_table.customContextMenuRequested.connect(self.on_app_table_context_menu)
 
         self.timer = QTimer()
         self.timer.setInterval(1000)
@@ -297,6 +303,7 @@ class MainWindow(QMainWindow):
         self._last_app = app_name
 
     def refresh_app_usage(self):
+        current_row = self.app_table.currentRow()
         usages = self.db.get_app_usage_for_date(self.selected_date)
         self.app_table.setRowCount(0)
         for u in usages:
@@ -305,6 +312,8 @@ class MainWindow(QMainWindow):
             self.app_table.setItem(row, 0, QTableWidgetItem(u.get("app_name", "")))
             secs = u.get("total_seconds") or 0
             self.app_table.setItem(row, 1, QTableWidgetItem(self._format_duration(secs)))
+        if current_row >= 0 and current_row < self.app_table.rowCount():
+            self.app_table.selectRow(current_row)
 
     def refresh_logs(self):
         current_row = self.log_table.currentRow()
@@ -337,10 +346,7 @@ class MainWindow(QMainWindow):
         if session_id == self.current_session_id:
             QMessageBox.warning(self, "오류", "현재 진행 중인 세션은 삭제할 수 없습니다.")
             return
-        pin, ok = QInputDialog.getText(
-            self, "세션 삭제", "삭제하려면 PIN을 입력하세요:",
-            QLineEdit.EchoMode.Password
-        )
+        pin, ok = self._ask_pin("세션 삭제", "삭제하려면 PIN을 입력하세요:")
         if not ok:
             return
         if not self.db.verify_pin(pin):
@@ -348,6 +354,25 @@ class MainWindow(QMainWindow):
             return
         self.db.delete_session(session_id)
         self.refresh_ui()
+
+    def on_app_table_context_menu(self, pos):
+        row = self.app_table.rowAt(pos.y())
+        if row < 0:
+            return
+        app_name = self.app_table.item(row, 0).text()
+        menu = QMenu(self)
+        delete_action = menu.addAction("이 프로그램 기록 삭제")
+        action = menu.exec(self.app_table.viewport().mapToGlobal(pos))
+        if action != delete_action:
+            return
+        pin, ok = self._ask_pin("기록 삭제", "삭제하려면 PIN을 입력하세요:")
+        if not ok:
+            return
+        if not self.db.verify_pin(pin):
+            QMessageBox.warning(self, "오류", "PIN이 올바르지 않습니다.")
+            return
+        self.db.delete_app_usage_by_name_and_date(app_name, self.selected_date)
+        self.refresh_app_usage()
 
     def on_prev_date(self):
         new_date = self.selected_date - timedelta(days=1)
@@ -372,10 +397,7 @@ class MainWindow(QMainWindow):
         # PIN이 설정되어 있으면 PIN 입력 없이 종료 불가
         pin_exists = self.db.get_setting("pin_sha256") is not None
         if pin_exists:
-            pin, ok = QInputDialog.getText(
-                self, "종료 인증", "앱을 종료하려면 PIN을 입력하세요:",
-                QLineEdit.EchoMode.Password
-            )
+            pin, ok = self._ask_pin("종료 인증", "앱을 종료하려면 PIN을 입력하세요:")
             if not ok or not self.db.verify_pin(pin):
                 event.ignore()
                 return
@@ -385,11 +407,33 @@ class MainWindow(QMainWindow):
             self.db.end_session(self.current_session_id, now.isoformat())
         event.accept()
 
+    def _ask_pin(self, title, label):
+        """숫자 4자리 전용 PIN 입력 다이얼로그. (pin, ok) 반환."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        lay = QVBoxLayout(dlg)
+        lbl = QLabel(label)
+        lay.addWidget(lbl)
+        pin_edit = QLineEdit()
+        pin_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        pin_edit.setMaxLength(4)
+        pin_edit.setValidator(QIntValidator(0, 9999))
+        pin_edit.setPlaceholderText("0000")
+        lay.addWidget(pin_edit)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        lay.addWidget(buttons)
+        pin_edit.setFocus()
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            return pin_edit.text(), True
+        return "", False
+
     def _prompt_set_pin(self) -> bool:
-        p1, ok1 = QInputDialog.getText(self, "PIN 생성", "새 PIN 입력:", QLineEdit.EchoMode.Password)
-        if not ok1 or not p1:
+        p1, ok1 = self._ask_pin("PIN 생성", "숫자 4자리 PIN 입력:")
+        if not ok1 or len(p1) != 4:
             return False
-        p2, ok2 = QInputDialog.getText(self, "PIN 확인", "PIN 다시 입력:", QLineEdit.EchoMode.Password)
+        p2, ok2 = self._ask_pin("PIN 확인", "PIN 다시 입력:")
         if not ok2 or p1 != p2:
             QMessageBox.warning(self, "오류", "PIN이 일치하지 않거나 입력이 취소되었습니다.")
             return False
@@ -398,26 +442,15 @@ class MainWindow(QMainWindow):
         return True
 
     def _change_pin(self):
-        # 현재 PIN 확인
-        cur_pin, ok = QInputDialog.getText(
-            self, "PIN 변경", "현재 PIN을 입력하세요:",
-            QLineEdit.EchoMode.Password
-        )
+        cur_pin, ok = self._ask_pin("PIN 변경", "현재 PIN을 입력하세요:")
         if not ok or not self.db.verify_pin(cur_pin):
             if ok:
                 QMessageBox.warning(self, "오류", "현재 PIN이 올바르지 않습니다.")
             return
-        # 새 PIN 입력
-        new1, ok1 = QInputDialog.getText(
-            self, "PIN 변경", "새 PIN 입력:",
-            QLineEdit.EchoMode.Password
-        )
-        if not ok1 or not new1:
+        new1, ok1 = self._ask_pin("PIN 변경", "새 숫자 4자리 PIN 입력:")
+        if not ok1 or len(new1) != 4:
             return
-        new2, ok2 = QInputDialog.getText(
-            self, "PIN 변경", "새 PIN 다시 입력:",
-            QLineEdit.EchoMode.Password
-        )
+        new2, ok2 = self._ask_pin("PIN 변경", "새 PIN 다시 입력:")
         if not ok2 or new1 != new2:
             QMessageBox.warning(self, "오류", "새 PIN이 일치하지 않습니다.")
             return
