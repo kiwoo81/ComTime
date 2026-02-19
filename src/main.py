@@ -30,9 +30,9 @@ else:
     _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _DB_PATH = os.path.join(_BASE_DIR, "comtime.db")
 
-# 아이콘 경로: 프로젝트 루트에 위치
+# 아이콘 경로: frozen exe는 _MEIPASS(번들 임시 폴더), 스크립트는 프로젝트 루트
 if getattr(sys, "frozen", False):
-    _ICON_PATH = os.path.join(_BASE_DIR, "comtime_icon.png")
+    _ICON_PATH = os.path.join(sys._MEIPASS, "comtime_icon.png")
 else:
     _ICON_PATH = os.path.join(os.path.dirname(_BASE_DIR), "comtime_icon.png")
 
