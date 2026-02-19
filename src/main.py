@@ -113,6 +113,8 @@ class MainWindow(QMainWindow):
                 self.running = True
             except Exception:
                 self.running = False
+        if self.running and self.current_session_id and self.session_start:
+            self._normalize_open_session_boundaries()
 
         central = QWidget()
         layout = QVBoxLayout()
@@ -237,6 +239,22 @@ class MainWindow(QMainWindow):
         self._app_timer.start()
         self.refresh_ui()
 
+    def _normalize_open_session_boundaries(self):
+        """열린 세션이 자정을 넘긴 경우 날짜 경계(00:00) 기준으로 분할 복구."""
+        if not self.running or not self.current_session_id or not self.session_start:
+            return
+        now = datetime.now()
+        next_midnight = datetime.combine(
+            self.session_start.date() + timedelta(days=1),
+            datetime.min.time(),
+        )
+        while next_midnight <= now:
+            self.db.end_session(self.current_session_id, next_midnight.isoformat())
+            self.current_session_id = self.db.start_session(next_midnight.isoformat())
+            self.session_start = next_midnight
+            next_midnight += timedelta(days=1)
+        self.current_date = now.date()
+
     def on_stop(self):
         if not self.running:
             return
@@ -257,18 +275,11 @@ class MainWindow(QMainWindow):
 
     def update_timer(self):
         today = date.today()
-        if today != self.current_date:
-            if self.running and self.current_session_id:
-                midnight = datetime.combine(today, datetime.min.time())
-                self.db.end_session(self.current_session_id, midnight.isoformat())
-                new_id = self.db.start_session(midnight.isoformat())
-                self.current_session_id = new_id
-                self.session_start = midnight
-            self.current_date = today
-            self.date_edit.setMaximumDate(QDate.currentDate())
+        if self.running and self.current_session_id and self.session_start:
+            self._normalize_open_session_boundaries()
+        self.current_date = today
+        self.date_edit.setMaximumDate(QDate.currentDate())
         total = self.db.get_total_seconds_for_date(self.selected_date)
-        if self.running and self.session_start and self.selected_date == self.current_date:
-            total += int((datetime.now() - self.session_start).total_seconds())
         hrs = total // 3600
         mins = (total % 3600) // 60
         secs = total % 60

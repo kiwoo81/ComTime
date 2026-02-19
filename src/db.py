@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import hashlib
 
 
@@ -63,29 +63,49 @@ class Database:
 
     def get_sessions_for_date(self, d: date):
         cur = self.conn.cursor()
-        date_str = d.isoformat()
+        day_start = datetime.combine(d, datetime.min.time())
+        day_end = day_start + timedelta(days=1)
+        now_iso = datetime.now().isoformat()
         cur.execute(
             """
         SELECT * FROM sessions
-        WHERE date(start_ts)=? OR date(end_ts)=?
+        WHERE start_ts < ? AND COALESCE(end_ts, ?) > ?
         ORDER BY start_ts DESC
         """,
-            (date_str, date_str),
+            (day_end.isoformat(), now_iso, day_start.isoformat()),
         )
         return [dict(r) for r in cur.fetchall()]
 
     def get_total_seconds_for_date(self, d: date) -> int:
         cur = self.conn.cursor()
-        date_str = d.isoformat()
+        day_start = datetime.combine(d, datetime.min.time())
+        day_end = day_start + timedelta(days=1)
+        now = datetime.now()
         cur.execute(
             """
-        SELECT SUM(duration_seconds) as total FROM sessions
-        WHERE date(start_ts)=? OR date(end_ts)=?
+        SELECT start_ts, end_ts FROM sessions
+        WHERE start_ts < ? AND COALESCE(end_ts, ?) > ?
         """,
-            (date_str, date_str),
+            (day_end.isoformat(), now.isoformat(), day_start.isoformat()),
         )
-        row = cur.fetchone()
-        return int(row[0] or 0)
+        total = 0
+        for row in cur.fetchall():
+            try:
+                start = datetime.fromisoformat(row["start_ts"])
+            except Exception:
+                continue
+            if row["end_ts"]:
+                try:
+                    end = datetime.fromisoformat(row["end_ts"])
+                except Exception:
+                    continue
+            else:
+                end = now
+            overlap_start = max(start, day_start)
+            overlap_end = min(end, day_end)
+            if overlap_end > overlap_start:
+                total += int((overlap_end - overlap_start).total_seconds())
+        return total
 
     def get_open_session(self):
         cur = self.conn.cursor()
@@ -150,33 +170,37 @@ class Database:
     def get_app_usage_for_date(self, d: date):
         """날짜별 앱 사용 요약 (앱별 총 사용시간, 내림차순)."""
         cur = self.conn.cursor()
-        date_str = d.isoformat()
+        day_start = datetime.combine(d, datetime.min.time())
+        day_end = day_start + timedelta(days=1)
+        now_iso = datetime.now().isoformat()
         cur.execute(
             """
             SELECT au.app_name, SUM(au.duration_seconds) as total_seconds
             FROM app_usage au
             JOIN sessions s ON au.session_id = s.id
-            WHERE date(s.start_ts)=? OR date(s.end_ts)=?
+            WHERE s.start_ts < ? AND COALESCE(s.end_ts, ?) > ?
             GROUP BY au.app_name
             ORDER BY total_seconds DESC
             """,
-            (date_str, date_str),
+            (day_end.isoformat(), now_iso, day_start.isoformat()),
         )
         return [dict(r) for r in cur.fetchall()]
 
     def delete_app_usage_by_name_and_date(self, app_name: str, d: date):
         """특정 날짜의 특정 앱 사용 기록 전체 삭제."""
         cur = self.conn.cursor()
-        date_str = d.isoformat()
+        day_start = datetime.combine(d, datetime.min.time())
+        day_end = day_start + timedelta(days=1)
+        now_iso = datetime.now().isoformat()
         cur.execute(
             """
             DELETE FROM app_usage WHERE id IN (
                 SELECT au.id FROM app_usage au
                 JOIN sessions s ON au.session_id = s.id
-                WHERE au.app_name=? AND (date(s.start_ts)=? OR date(s.end_ts)=?)
+                WHERE au.app_name=? AND s.start_ts < ? AND COALESCE(s.end_ts, ?) > ?
             )
             """,
-            (app_name, date_str, date_str),
+            (app_name, day_end.isoformat(), now_iso, day_start.isoformat()),
         )
         self.conn.commit()
 
