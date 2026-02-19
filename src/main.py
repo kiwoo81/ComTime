@@ -188,6 +188,9 @@ class MainWindow(QMainWindow):
         settings_menu = menu_bar.addMenu("설정")
         change_pin_action = settings_menu.addAction("PIN 변경")
         change_pin_action.triggered.connect(self._change_pin)
+        self._autostart_action = settings_menu.addAction("")
+        self._autostart_action.triggered.connect(self._toggle_autostart)
+        self._update_autostart_label()
 
         self.stop_btn.clicked.connect(self.on_stop)
         self.prev_btn.clicked.connect(self.on_prev_date)
@@ -457,6 +460,83 @@ class MainWindow(QMainWindow):
         self.db.set_pin(new1)
         QMessageBox.information(self, "완료", "PIN이 변경되었습니다.")
 
+    # ── 자동 시작 ──
+
+    def _get_app_exec_args(self):
+        """자동 시작에 등록할 실행 경로/인자 리스트 반환."""
+        if getattr(sys, "frozen", False):
+            return [sys.executable]
+        else:
+            return [sys.executable, os.path.abspath(__file__)]
+
+    def _update_autostart_label(self):
+        current = self.db.get_setting("auto_start")
+        if current == "1":
+            self._autostart_action.setText("자동 시작 해제")
+        else:
+            self._autostart_action.setText("자동 시작 등록")
+
+    def _toggle_autostart(self):
+        pin, ok = self._ask_pin("자동 시작 설정", "설정을 변경하려면 PIN을 입력하세요:")
+        if not ok:
+            return
+        if not self.db.verify_pin(pin):
+            QMessageBox.warning(self, "오류", "PIN이 올바르지 않습니다.")
+            return
+
+        enable = self.db.get_setting("auto_start") != "1"
+        try:
+            if sys.platform == "darwin":
+                self._set_autostart_macos(enable)
+            elif sys.platform == "win32":
+                self._set_autostart_windows(enable)
+            else:
+                QMessageBox.information(self, "안내", "이 운영체제에서는 자동 시작이 지원되지 않습니다.")
+                return
+        except Exception as e:
+            QMessageBox.warning(self, "오류", f"자동 시작 설정 실패: {e}")
+            return
+
+        self.db.set_setting("auto_start", "1" if enable else "0")
+        state = "등록" if enable else "해제"
+        QMessageBox.information(self, "완료", f"자동 시작이 {state}되었습니다.")
+        self._update_autostart_label()
+
+    def _set_autostart_macos(self, enable):
+        import plistlib
+        agents_dir = os.path.expanduser("~/Library/LaunchAgents")
+        plist_path = os.path.join(agents_dir, "com.comtime.app.plist")
+        if enable:
+            os.makedirs(agents_dir, exist_ok=True)
+            plist_data = {
+                "Label": "com.comtime.app",
+                "ProgramArguments": self._get_app_exec_args(),
+                "RunAtLoad": True,
+                "KeepAlive": False,
+            }
+            with open(plist_path, "wb") as f:
+                plistlib.dump(plist_data, f)
+        else:
+            if os.path.exists(plist_path):
+                os.remove(plist_path)
+
+    def _set_autostart_windows(self, enable):
+        import winreg
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE
+        )
+        if enable:
+            args = self._get_app_exec_args()
+            cmd = " ".join(f'"{a}"' for a in args)
+            winreg.SetValueEx(key, "ComTime", 0, winreg.REG_SZ, cmd)
+        else:
+            try:
+                winreg.DeleteValue(key, "ComTime")
+            except FileNotFoundError:
+                pass
+        winreg.CloseKey(key)
+
 
 class KioskWindow(QMainWindow):
     def __init__(self, on_unlock=None):
@@ -544,7 +624,29 @@ class KioskWindow(QMainWindow):
             event.ignore()
 
 
+def _acquire_single_instance():
+    """단일 인스턴스 보장. 이미 실행 중이면 sys.exit()."""
+    import tempfile
+    lock_path = os.path.join(tempfile.gettempdir(), "comtime.lock")
+    # 파일을 열어두고 잠금 — 프로세스 종료 시 OS가 자동 해제
+    lock_file = open(lock_path, "w")
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (OSError, IOError):
+        # 이미 실행 중 — 알림 후 종료
+        _app = QApplication(sys.argv)
+        QMessageBox.information(None, "ComTime", "ComTime이 이미 실행 중입니다.")
+        sys.exit(0)
+    return lock_file  # 참조를 유지해야 잠금이 풀리지 않음
+
+
 if __name__ == "__main__":
+    _lock = _acquire_single_instance()
     app = QApplication(sys.argv)
     app.setStyle("Fusion")  # Mac/Windows 동일한 스타일 렌더링
     if os.path.exists(_ICON_PATH):
