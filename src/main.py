@@ -113,6 +113,9 @@ class MainWindow(QMainWindow):
                 self.running = True
             except Exception:
                 self.running = False
+        # 비정상 종료(Windows 강제 종료, 절전 등) 감지: 하트비트 기반
+        if self.running:
+            self._check_shutdown_and_close_session()
         if self.running and self.current_session_id and self.session_start:
             self._normalize_open_session_boundaries()
 
@@ -211,6 +214,11 @@ class MainWindow(QMainWindow):
         self._app_timer.setInterval(5000)
         self._app_timer.timeout.connect(self._track_foreground_app)
 
+        # 하트비트 타이머 (30초 간격) - 비정상 종료(강제 종료, 절전) 감지용
+        self._heartbeat_timer = QTimer()
+        self._heartbeat_timer.setInterval(30000)
+        self._heartbeat_timer.timeout.connect(self._update_heartbeat)
+
         # PIN이 없으면 최초 실행 시 설정 (부모가 설정)
         if self.db.get_setting("pin_sha256") is None:
             self._prompt_set_pin()
@@ -222,6 +230,8 @@ class MainWindow(QMainWindow):
             self.stop_btn.setEnabled(True)
             self.timer.start()
             self._app_timer.start()
+            self._heartbeat_timer.start()
+            self._update_heartbeat()
 
         self.refresh_ui()
 
@@ -237,6 +247,8 @@ class MainWindow(QMainWindow):
         self.stop_btn.setEnabled(True)
         self.timer.start()
         self._app_timer.start()
+        self._heartbeat_timer.start()
+        self._update_heartbeat()
         self.refresh_ui()
 
     def _normalize_open_session_boundaries(self):
@@ -260,6 +272,7 @@ class MainWindow(QMainWindow):
             return
         now = datetime.now()
         self._app_timer.stop()
+        self._heartbeat_timer.stop()
         self._last_app = None
         self.db.end_session(self.current_session_id, now.isoformat())
         self.running = False
@@ -315,6 +328,37 @@ class MainWindow(QMainWindow):
             return
         self.db.record_app_usage(self.current_session_id, app_name, 5)
         self._last_app = app_name
+
+    def _update_heartbeat(self):
+        """현재 시각을 DB에 저장. 비정상 종료(강제 종료, 절전) 감지에 사용."""
+        self.db.set_setting("last_heartbeat", datetime.now().isoformat())
+
+    def _check_shutdown_and_close_session(self):
+        """비정상 종료 여부를 하트비트로 감지.
+        마지막 하트비트와 현재 시각의 차이가 2분을 초과하면
+        컴퓨터가 꺼져 있었던 것으로 판단하고 세션을 하트비트 시각에 종료."""
+        _THRESHOLD = 120  # 2분
+        last_hb_str = self.db.get_setting("last_heartbeat")
+        end_at = None
+
+        if last_hb_str:
+            try:
+                last_hb = datetime.fromisoformat(last_hb_str)
+                gap = (datetime.now() - last_hb).total_seconds()
+                if gap > _THRESHOLD:
+                    # 하트비트가 세션 시작보다 이전이면 세션 시작 시각으로 대체
+                    end_at = last_hb if last_hb > self.session_start else self.session_start
+            except Exception:
+                end_at = self.session_start
+        else:
+            # 하트비트 기록 없음 → 이전 버전에서 업그레이드된 경우 등, 비정상으로 간주
+            end_at = self.session_start
+
+        if end_at is not None:
+            self.db.end_session(self.current_session_id, end_at.isoformat())
+            self.current_session_id = None
+            self.session_start = None
+            self.running = False
 
     def refresh_app_usage(self):
         current_row = self.app_table.currentRow()
@@ -418,6 +462,7 @@ class MainWindow(QMainWindow):
         if self.running and self.current_session_id:
             now = datetime.now()
             self._app_timer.stop()
+            self._heartbeat_timer.stop()
             self.db.end_session(self.current_session_id, now.isoformat())
         event.accept()
 
