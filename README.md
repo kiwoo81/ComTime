@@ -9,7 +9,7 @@
 - **키오스크 잠금** - 사용 중지 시 전체화면 잠금 ("사용 시작" 버튼으로 해제)
 - **PIN 보호** - 숫자 4자리 PIN으로 앱 종료, 기록 삭제, PIN 변경 시 인증
 - **날짜별 이력 조회** - 과거 날짜의 사용시간 및 프로그램 내역 확인
-- **세션 자동 복구** - 비정상 종료 후 재시작 시 중단된 세션 복구
+- **세션 자동 복구** - 비정상 종료(강제 종료, 절전) 후 재시작 시 꺼져 있던 시간을 제외하고 세션 복구
 - **자정 자동 리셋** - 자정에 새 세션 시작
 - **자동 시작 등록** - 컴퓨터 부팅 시 자동 실행 등록/해제 (PIN 보호)
 - **단일 인스턴스** - 중복 실행 방지
@@ -35,8 +35,8 @@ python src/main.py
 pyinstaller --onefile --windowed --name ComTime --icon=comtime_icon.ico \
   --add-data "src/db.py;." --add-data "comtime_icon.png;." src/main.py
 
-# macOS
-pyinstaller --onefile --windowed --name ComTime --icon=comtime_icon.icns \
+# macOS (.app 번들)
+pyinstaller --onedir --windowed --name ComTime --icon=comtime_icon.icns \
   --add-data "src/db.py:." --add-data "comtime_icon.png:." src/main.py
 ```
 

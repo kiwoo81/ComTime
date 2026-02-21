@@ -48,6 +48,7 @@ ComTime/
 - 세션 우클릭 삭제
 - PIN 인증으로 앱 종료 보호 / PIN 변경 메뉴
 - 세션 자동 복구 및 자정 리셋
+- 하트비트(30초 간격) 기반 비정상 종료 감지 → 재시작 시 꺼져 있던 시간 제외
 
 ### KioskWindow (src/main.py)
 - 사용 종료 후 전체화면 잠금 (탈출 불가)
@@ -56,7 +57,7 @@ ComTime/
 
 ### db.py
 - `sessions` 테이블: 세션 start/end 타임스탬프, 소요 시간
-- `settings` 테이블: PIN(SHA256), 기타 설정값
+- `settings` 테이블: PIN(SHA256), `last_heartbeat`(비정상 종료 감지), 기타 설정값
 - `app_usage` 테이블: 세션별 프로그램 사용 기록 (앱명, 사용 시간)
 
 ## 실행 방법
@@ -77,7 +78,7 @@ pyinstaller --onefile --windowed --name ComTime --icon=comtime_icon.ico --add-da
 
 ### macOS (.app)
 ```bash
-pyinstaller --onefile --windowed --name ComTime --icon=comtime_icon.icns --add-data "src/db.py:." --add-data "comtime_icon.png:." src/main.py
+pyinstaller --onedir --windowed --name ComTime --icon=comtime_icon.icns --add-data "src/db.py:." --add-data "comtime_icon.png:." src/main.py
 ```
 
 ### 공통
