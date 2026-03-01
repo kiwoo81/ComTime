@@ -219,6 +219,13 @@ class MainWindow(QMainWindow):
         self._heartbeat_timer.setInterval(30000)
         self._heartbeat_timer.timeout.connect(self._update_heartbeat)
 
+        # 잠금 유예 타이머: 1분 이내 잠금 해제 시 세션을 끊지 않고 계속 사용으로 처리
+        self._lock_start_time = None
+        self._lock_timeout_timer = QTimer()
+        self._lock_timeout_timer.setSingleShot(True)
+        self._lock_timeout_timer.setInterval(60000)  # 1분
+        self._lock_timeout_timer.timeout.connect(self._do_end_session)
+
         # PIN이 없으면 최초 실행 시 설정 (부모가 설정)
         if self.db.get_setting("pin_sha256") is None:
             self._prompt_set_pin()
@@ -238,6 +245,25 @@ class MainWindow(QMainWindow):
     def on_start(self):
         if self.running:
             return
+        # 1분 이내 잠금 해제: 기존 세션 유지 (새 세션 시작 없이 재개)
+        if self._lock_start_time and self.current_session_id and self.session_start:
+            elapsed = (datetime.now() - self._lock_start_time).total_seconds()
+            if elapsed < 60:
+                self._lock_timeout_timer.stop()
+                self._lock_start_time = None
+                self.running = True
+                self.stop_btn.setEnabled(True)
+                self.timer.start()
+                self._app_timer.start()
+                self._heartbeat_timer.start()
+                self._update_heartbeat()
+                self.refresh_ui()
+                return
+            else:
+                # 타이머가 아직 안 울렸지만 1분 초과 → 지금 세션 종료
+                self._lock_timeout_timer.stop()
+                self._do_end_session()
+
         now = datetime.now()
         self.session_start = now
         session_id = self.db.start_session(now.isoformat())
@@ -270,21 +296,29 @@ class MainWindow(QMainWindow):
     def on_stop(self):
         if not self.running:
             return
-        now = datetime.now()
         self._app_timer.stop()
         self._heartbeat_timer.stop()
         self._last_app = None
-        self.db.end_session(self.current_session_id, now.isoformat())
         self.running = False
-        self.current_session_id = None
-        self.session_start = None
         self.stop_btn.setEnabled(False)
         self.timer.stop()
+        # 세션을 바로 종료하지 않고 1분 유예: 이 시각을 잠금 시작 시각으로 기록
+        self._lock_start_time = datetime.now()
+        self._lock_timeout_timer.start()
         self.refresh_ui()
 
         # 잠금 화면 표시
         self.kiosk = KioskWindow(on_unlock=self.on_start)
         self.kiosk.show()
+
+    def _do_end_session(self):
+        """잠금 유예 1분 만료 시 세션을 실제로 종료."""
+        if self.current_session_id:
+            end_at = self._lock_start_time or datetime.now()
+            self.db.end_session(self.current_session_id, end_at.isoformat())
+            self.current_session_id = None
+            self.session_start = None
+        self._lock_start_time = None
 
     def update_timer(self):
         today = date.today()
@@ -362,6 +396,7 @@ class MainWindow(QMainWindow):
 
     def refresh_app_usage(self):
         current_row = self.app_table.currentRow()
+        scroll_pos = self.app_table.verticalScrollBar().value()
         usages = self.db.get_app_usage_for_date(self.selected_date)
         self.app_table.setRowCount(0)
         for u in usages:
@@ -372,9 +407,11 @@ class MainWindow(QMainWindow):
             self.app_table.setItem(row, 1, QTableWidgetItem(self._format_duration(secs)))
         if current_row >= 0 and current_row < self.app_table.rowCount():
             self.app_table.selectRow(current_row)
+        self.app_table.verticalScrollBar().setValue(scroll_pos)
 
     def refresh_logs(self):
         current_row = self.log_table.currentRow()
+        scroll_pos = self.log_table.verticalScrollBar().value()
         sessions = self.db.get_sessions_for_date(self.selected_date)
         self.log_table.setRowCount(0)
         for s in sessions:
@@ -390,6 +427,7 @@ class MainWindow(QMainWindow):
             self.log_table.setItem(row, 2, QTableWidgetItem(dur))
         if current_row >= 0 and current_row < self.log_table.rowCount():
             self.log_table.selectRow(current_row)
+        self.log_table.verticalScrollBar().setValue(scroll_pos)
 
     def on_log_table_context_menu(self, pos):
         row = self.log_table.rowAt(pos.y())
@@ -459,11 +497,14 @@ class MainWindow(QMainWindow):
             if not ok or not self.db.verify_pin(pin):
                 event.ignore()
                 return
-        if self.running and self.current_session_id:
+        self._lock_timeout_timer.stop()
+        if self.current_session_id:
             now = datetime.now()
             self._app_timer.stop()
             self._heartbeat_timer.stop()
-            self.db.end_session(self.current_session_id, now.isoformat())
+            # 잠금 중 종료 시 잠금 시작 시각을 세션 종료 시각으로 사용
+            end_at = self._lock_start_time or now
+            self.db.end_session(self.current_session_id, end_at.isoformat())
         event.accept()
 
     def _ask_pin(self, title, label):
@@ -618,7 +659,8 @@ class KioskWindow(QMainWindow):
 
     def _ensure_on_top(self):
         self.raise_()
-        self.activateWindow()
+        # activateWindow() 제거: 500ms마다 호출 시 OS 유휴 타이머를 초기화해
+        # 시스템이 절전 모드로 진입하지 못하는 문제 발생
         if sys.platform == "win32":
             try:
                 import ctypes
@@ -627,8 +669,7 @@ class KioskWindow(QMainWindow):
                 ctypes.windll.user32.SetWindowPos(
                     hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002
                 )
-                # 포커스 강제 획득
-                ctypes.windll.user32.SetForegroundWindow(hwnd)
+                # SetForegroundWindow 제거: OS 유휴 타이머 초기화 방지
             except Exception:
                 pass
 

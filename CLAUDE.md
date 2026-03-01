@@ -49,10 +49,13 @@ ComTime/
 - PIN 인증으로 앱 종료 보호 / PIN 변경 메뉴
 - 세션 자동 복구 및 자정 리셋
 - 하트비트(30초 간격) 기반 비정상 종료 감지 → 재시작 시 꺼져 있던 시간 제외
+- 잠금 유예: 1분 이내 잠금 해제 시 세션 유지 (새 세션 생성 없이 재개)
+- 테이블 스크롤 위치 유지 (1초 갱신 시에도 스크롤 위치 보존)
 
 ### KioskWindow (src/main.py)
 - 사용 종료 후 전체화면 잠금 (탈출 불가)
-- Windows: 작업 표시줄 숨김, ctypes로 항상 위 표시 및 포커스 강제
+- Windows: 작업 표시줄 숨김, ctypes SetWindowPos(HWND_TOPMOST)로 항상 위 표시
+- macOS/Windows 공통: `activateWindow()` / `SetForegroundWindow` 미호출 → 절전 모드 진입 허용
 - "사용 시작" 버튼으로 재개
 
 ### db.py
